@@ -74,6 +74,41 @@
       <artifactId>jersey-multipart</artifactId>
       <version>1.8</version>
     </dependency>
+    
+    <!-- ********************************************* -->
+    <!-- OSB library -->
+    <dependency>
+      <groupId>com.oracle.weblogic</groupId>
+      <artifactId>servicebus</artifactId>
+      <version>${weblogic.server.merged.version}</version>
+      <scope>provided</scope>
+    </dependency>
+        
+    <dependency>
+      <groupId>com.oracle.weblogic</groupId>
+      <artifactId>servicebus.kernel</artifactId>
+      <version>${weblogic.server.merged.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    
+    <dependency>
+      <groupId>com.oracle.weblogic</groupId>
+      <artifactId>servicebus.configfwk</artifactId>
+      <version>${weblogic.server.merged.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <!-- ********************************************* -->
+    
+    <!-- ********************************************* -->
+    <!-- SOA-BPM library  -->
+    <dependency>
+      <groupId>com.oracle.weblogic</groupId>
+      <artifactId>fabric.runtime</artifactId>
+      <version>${weblogic.server.merged.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <!-- ********************************************* -->
+    
   </dependencies>
 
   <build>

@@ -86,10 +86,10 @@ public class WLSoaBpmStats implements WLSoaBpmStatsMXBean, MBeanRegistration {
 	}
 
 	/**
-	 * The version of the WLHostMachineStats MBean. 
+	 * The version of the WLSoaBpmStats MBean. 
 	 * Format: "x.x.x". Example: "0.1.0".
 	 * 
-	 * @return The version of WLHostMachineStats MBean
+	 * @return The version of WLSoaBpmStats MBean
 	 */
 	public String getMBeanVersion() {
 		return WL_SOA_BPM_APP_VERSION;

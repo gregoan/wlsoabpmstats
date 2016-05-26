@@ -14,14 +14,25 @@
 //POSSIBILITY OF SUCH DAMAGE.
 package wlsoabpmstats.mbeans;
 
-import java.lang.management.ManagementFactory;
-import java.lang.management.MemoryMXBean;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Proxy;
+import java.util.HashMap;
+import java.util.Map;
 
 import javax.management.MBeanRegistration;
 import javax.management.MBeanServer;
+import javax.management.MBeanServerConnection;
+import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
+import javax.management.remote.JMXConnector;
+import javax.management.remote.JMXConnectorFactory;
+import javax.management.remote.JMXServiceURL;
+import javax.naming.InitialContext;
+import javax.naming.NamingException;
 
-import weblogic.logging.NonCatalogLogger;
+import wlsoabpmstats.util.AppLog;
+
+import com.bea.wli.monitoring.ServiceDomainMBean;
 
 /**
  * Implementation of the MBean exposing O.S/machine statistics for the machine
@@ -35,21 +46,219 @@ import weblogic.logging.NonCatalogLogger;
 public class WLSoaBpmStats implements WLSoaBpmStatsMXBean, MBeanRegistration {
 	
 	// Constants
-	private static final String WL_SOA_BPM_APP_NAME = "WLSoaBpmStats";
 	private static final String WL_SOA_BPM_APP_VERSION = "0.0.1";
-	//private static final int PERCENT = 100;
-	private static final int BYTES_PER_MEGABYTE = 1024*1024;
+	
+	
+	protected final static String JNDI_ROOT = "/jndi/";
+	private final static String[] LOCAL_SERVER_RUNTIME_MBEAN_JNDI_LOOKUPS = {"java:comp/env/jmx/runtime", "java:comp/jmx/runtime"};
+	private static volatile MBeanServerConnection cachedLocalConn = null;
 	
 	// Members 
-	private final NonCatalogLogger log;
-		
+	private ServiceDomainMBean serviceDomainMBean = null;
+	
+	//private static final ObjectName domainRuntimeServiceMBean;
+	private static final ObjectName serverRuntimeServiceMBean;
+	
+	/*
+	static {
+		try {
+			domainRuntimeServiceMBean = new ObjectName("com.bea:Name=DomainRuntimeService,Type=weblogic.management.mbeanservers.domainruntime.DomainRuntimeServiceMBean");
+		} catch (MalformedObjectNameException e) {
+			throw new AssertionError(e.toString());
+		}
+	}
+	*/
+	
+	static {
+		try {
+			serverRuntimeServiceMBean = new ObjectName("com.bea:Name=RuntimeService,Type=weblogic.management.mbeanservers.runtime.RuntimeServiceMBean");
+		} catch (MalformedObjectNameException e) {
+			throw new AssertionError(e.toString());
+		}
+	}
+	
+	//public final static String DOMAIN_CONFIGURATION = "DomainConfiguration";
+	
+	// Constants
+	private static final String DOMAIN_RUNTIME_SERVICE_NAME = "weblogic.management.mbeanservers.domainruntime";
+	private static final String WEBLOGIC_PROVIDER_PACKAGES = "weblogic.management.remote";
+	private static final String WEBLOGIC_INSECURE_REMOTE_PROTOCOL = "t3";
+	private static final String WEBLOGIC_SECURE_REMOTE_PROTOCOL = "t3s";
+	
+	public static final String DEFAULT_WKMGR_NAME = "weblogic.kernel.Default";
+	public final static String SERVER_RUNTIME = "ServerRuntime";
+	public final static String ADMIN_SERVER_HOSTNAME = "AdminServerHost";
+	public final static String ADMIN_SERVER_PORT = "AdminServerListenPort";
+	public final static String ADMIN_SERVER_NAME = "AdminServerName";
+	public final static String IS_ADMIN_SERVER_PORT_SECURED = "AdminServerListenPortSecure";
+	public final static String WORK_MANAGER_RUNTIMES = "WorkManagerRuntimes";
+	public final static String NAME = "Name";
+
 	/**
-	 * Main constructor
 	 * 
-	 * @param netInterfaceNames Comma separated list of names of the preferred network interface to try to monitor
+	 */
+	private boolean init(String serviceName) {
+		
+		try {
+			MBeanServerConnection localConn = getCachedLocalConn();
+			ObjectName serverRuntime = (ObjectName) localConn.getAttribute(serverRuntimeServiceMBean, SERVER_RUNTIME);
+			boolean isSecure = ((Boolean) localConn.getAttribute(serverRuntime, IS_ADMIN_SERVER_PORT_SECURED)).booleanValue();
+			String protocol = isSecure ? WEBLOGIC_SECURE_REMOTE_PROTOCOL: WEBLOGIC_INSECURE_REMOTE_PROTOCOL;
+			String host = (String) localConn.getAttribute(serverRuntime, ADMIN_SERVER_HOSTNAME);
+			int port = ((Integer) localConn.getAttribute(serverRuntime, ADMIN_SERVER_PORT)).intValue();
+			jmxConnector = JMXConnectorFactory.connect(new JMXServiceURL(protocol, host, port, JNDI_ROOT + serviceName), getJMXContextProps());
+			conn = jmxConnector.getMBeanServerConnection();
+			
+			return true;
+		} catch (Exception ex) {
+			AppLog.getLogger().error("Error during init of jmxConnector object - The message is [" + ex.getMessage() + "]");
+			
+			jmxConnector = null;
+			conn = null;
+			serviceDomainMBean = null;
+			return false;
+		}
+	}
+	
+	/**
+	 * Populate a JNDI context property file with the minimum properties 
+	 * required to access a WebLogic MBean server tree
+	 * 
+	 * @return WebLogic properties file
+	 */
+	protected Map<String, String> getJMXContextProps() {
+		Map<String, String> props = new HashMap<String, String>();
+		props.put(JMXConnectorFactory.PROTOCOL_PROVIDER_PACKAGES, WEBLOGIC_PROVIDER_PACKAGES);
+		return props;
+	}
+	
+	/**
+	 * Returns the current MBeanServer connection to overriding classes.
+	 * 
+	 * @return The current JMX Mbean server connection
+	 */
+	protected MBeanServerConnection getConn() {
+		return conn;
+	}
+	
+	// Members
+	private JMXConnector jmxConnector;
+	private MBeanServerConnection conn;
+	
+	/**
+	 * 
+	 * @return
+	 * @throws NamingException
+	 */
+	private MBeanServerConnection getCachedLocalConn() throws NamingException {
+		if (cachedLocalConn == null) {		
+			synchronized (WLSoaBpmStats.class) {
+				if (cachedLocalConn == null) {
+					InitialContext ctx = null;
+					
+					try {
+						ctx = new InitialContext();
+						
+						for (String jndiLookup : LOCAL_SERVER_RUNTIME_MBEAN_JNDI_LOOKUPS) {
+							try {
+								cachedLocalConn = (MBeanServer) ctx.lookup(jndiLookup);
+								
+								if (cachedLocalConn == null) {
+									AppLog.getLogger().debug("Unable to locate local server runtime mbean using jndi lookup of: " + jndiLookup);
+								} else {
+									AppLog.getLogger().debug("Successfully located local server runtime mbean using jndi lookup of: " + jndiLookup);
+									break;
+								}
+							} catch (Exception e) {
+								AppLog.getLogger().error("Error attempting to locate local server runtime mbean using jndi lookup of: " + jndiLookup + "  (" + e + ")");
+							}
+						}
+					} finally {
+						if (ctx != null) {
+							try { ctx.close(); } catch (Exception e) {}
+						}
+					}
+				}
+			}
+		}
+		return cachedLocalConn;
+	}
+	
+	/**
+	 * 
+	 * @return
+	 */
+	/*
+	private ObjectName getServerRuntime() throws Exception {
+		
+		ObjectName serverRuntime = (ObjectName)getConn().getAttribute(serverRuntimeServiceMBean, SERVER_RUNTIME);
+		if(serverRuntime != null) {
+			AppAppLog.getLogger().getLogger().notice("Found the ServerRuntime");
+			return serverRuntime;
+		} else {
+			AppAppLog.getLogger().getLogger().error("Didn't find the ServerRuntime ...");
+			return null;
+		}
+	}
+	*/
+	
+	/**
+	 * 
+	 */
+	private boolean initServiceDomainMBean() {
+		
+		// -----------------------------------------------------------------------
+		try {
+			
+			/*
+			// --------------------------------------------------
+			// Is working but DH is a strong dependency ...
+			DomainRuntimeServiceMBeanConnection conn = new DomainRuntimeServiceMBeanConnection();
+			serviceDomainMBean = getServiceDomainMBean(conn);
+			if(serviceDomainMBean != null) {
+				AppAppLog.getLogger().getLogger().debug("serviceDomainMBean is properly configured");
+				return true;
+			} else {
+				AppAppLog.getLogger().getLogger().error("Unable to set serviceDomainMBean ...");
+				return false;
+			}
+			// --------------------------------------------------
+			*/
+			
+			if(init(DOMAIN_RUNTIME_SERVICE_NAME)) {
+				
+				serviceDomainMBean = getServiceDomainMBean(getConn());
+				if(serviceDomainMBean != null) {
+					AppLog.getLogger().debug("serviceDomainMBean is properly configured");
+					return true;
+				}
+				else {
+					AppLog.getLogger().error("Unable to set serviceDomainMBean");
+					return false;
+				}
+			}
+			else {
+				AppLog.getLogger().error("Unable to set serviceDomainMBean - The execution of init() method failed");
+				return false;
+			}
+		} catch (Exception ex) {
+			AppLog.getLogger().error("Unable to set serviceDomainMBean - The error message is [" + ex.getMessage());
+			return false;
+		}
+		// -----------------------------------------------------------------------
+				
+	}
+			
+	/**
+	 * Main constructor 
 	 */
 	public WLSoaBpmStats() {
-		log = new NonCatalogLogger(WL_SOA_BPM_APP_NAME);
+		
+		// Check if the MBean is instantiated each time of kept in memory for better performance
+		// -> Need to know how the data should be retrieved
+		if(!initServiceDomainMBean()) {
+			throw new IllegalStateException ("Unable to create WLSoaBpmStats object");
+		}
 	}
 	
 	/**
@@ -67,7 +276,7 @@ public class WLSoaBpmStats implements WLSoaBpmStatsMXBean, MBeanRegistration {
 	 * @param registrationDone Indicates if registration was completed
 	 */
 	public void postRegister(Boolean registrationDone) {
-		log.notice("WlSoaBpmStats MBean initialised");
+		AppLog.getLogger().notice("WlSoaBpmStats MBean initialised");
 	}
 
 	/**
@@ -82,7 +291,7 @@ public class WLSoaBpmStats implements WLSoaBpmStatsMXBean, MBeanRegistration {
 	 * Post-deregister event handler - logs that stopped
 	 */
 	public void postDeregister() {
-		log.notice("WlSoaBpmStats MBean destroyed");
+		AppLog.getLogger().notice("WlSoaBpmStats MBean destroyed");
 	}
 
 	/**
@@ -95,35 +304,16 @@ public class WLSoaBpmStats implements WLSoaBpmStatsMXBean, MBeanRegistration {
 		return WL_SOA_BPM_APP_VERSION;
 	}
 	
-	/**
-	 * 
-	 */
-	public double getHeapMemoryInit() {
-		MemoryMXBean memoryMXBean = ManagementFactory.getMemoryMXBean();
-	    return memoryMXBean.getHeapMemoryUsage().getInit() / BYTES_PER_MEGABYTE;
-	}
 	
 	/**
+	 * Gets an instance of ServiceDomainMBean from the weblogic server.
 	 * 
+	 * @param conn
+	 * @return
 	 */
-	public double getHeapMemoryUsed() {
-		MemoryMXBean memoryMXBean = ManagementFactory.getMemoryMXBean();
-	    return memoryMXBean.getHeapMemoryUsage().getUsed() / BYTES_PER_MEGABYTE;
-	}
-	
-	/**
-	 * 
-	 */
-	public double getHeapMemoryCommitted() {
-		MemoryMXBean memoryMXBean = ManagementFactory.getMemoryMXBean();
-	    return memoryMXBean.getHeapMemoryUsage().getCommitted() / BYTES_PER_MEGABYTE;
-	}
-	
-	/**
-	 * 
-	 */
-	public double getHeapMemoryMax() {
-		MemoryMXBean memoryMXBean = ManagementFactory.getMemoryMXBean();
-	    return memoryMXBean.getHeapMemoryUsage().getMax() / BYTES_PER_MEGABYTE;
+	private ServiceDomainMBean getServiceDomainMBean(MBeanServerConnection conn) {	
+    	InvocationHandler handler = new ServiceDomainMBeanInvocationHandler(conn);
+		Object proxy = Proxy.newProxyInstance(ServiceDomainMBean.class.getClassLoader(), new Class[] { ServiceDomainMBean.class }, handler);
+		return (ServiceDomainMBean) proxy;
 	}
 }

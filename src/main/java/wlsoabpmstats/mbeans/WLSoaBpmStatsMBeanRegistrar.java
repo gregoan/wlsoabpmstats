@@ -40,10 +40,13 @@ public class WLSoaBpmStatsMBeanRegistrar {
 	 * @throws NotCompliantMBeanException Indicates that the MBean is not constructed correctly
 	 */
 	public void register() throws NamingException, MalformedObjectNameException, InstanceAlreadyExistsException, MBeanRegistrationException, NotCompliantMBeanException {
+		
 		InitialContext ctx = new InitialContext(); 
 		MBeanServer mbs = (MBeanServer) ctx.lookup(RUNTIME_MBEAN_SERVER_JNDI_KEY); 
+		
 		WLSoaBpmStats mbean = new WLSoaBpmStats();
 		ObjectName mbeanObjName = new ObjectName(WL_SOA_BPM_STATS_MBEAN_NAME);
+		
 		mbs.registerMBean(mbean, mbeanObjName);
 		ctx.close();
 	}
@@ -57,6 +60,7 @@ public class WLSoaBpmStatsMBeanRegistrar {
 	 * @throws MBeanRegistrationException Indicates general problem occurred when trying to de-register MBean
 	 */
 	public void deregister() throws NamingException, MBeanRegistrationException, InstanceNotFoundException, MalformedObjectNameException {
+		
 		InitialContext ctx = new InitialContext(); 
 		MBeanServer mbs = (MBeanServer) ctx.lookup(RUNTIME_MBEAN_SERVER_JNDI_KEY);
 		ObjectName mbeanObjName = new ObjectName(WL_SOA_BPM_STATS_MBEAN_NAME);

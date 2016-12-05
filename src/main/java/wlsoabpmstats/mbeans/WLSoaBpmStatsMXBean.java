@@ -22,8 +22,4 @@ package wlsoabpmstats.mbeans;
  */
 public interface WLSoaBpmStatsMXBean {
 	
-	public double getHeapMemoryInit();
-	public double getHeapMemoryUsed();
-	public double getHeapMemoryCommitted();
-	public double getHeapMemoryMax();
 }
